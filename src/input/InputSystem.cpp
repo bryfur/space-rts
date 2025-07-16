@@ -1,7 +1,8 @@
 #include "InputSystem.h"
 #include "../components/Components.h"
 #include "../core/GameStateManager.h"
-#include "../systems/RenderSystem.h"
+#include "../gameplay/GameplaySystem.h"
+#include "../rendering/Renderer.h"
 #include "../ui/UISystem.h"
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_mouse.h>
@@ -24,6 +25,7 @@ InputSystem::InputSystem(ECSRegistry& registry)
     , mDragEndY(0)
     , mSelectedPlanet(INVALID_ENTITY)
     , mGameStateManager(nullptr)
+    , mGameplaySystem(nullptr)
 {
 }
 
@@ -136,8 +138,8 @@ void InputSystem::HandleMouseButtonUp(const SDL_MouseButtonEvent& event) {
         mIsDragging = false;
         
         // Hide drag selection box
-        if (mRenderSystem != nullptr) {
-            mRenderSystem->SetDragSelectionBox(0, 0, 0, 0, false);
+        if (mRenderer != nullptr) {
+            mRenderer->SetDragSelectionBox(0, 0, 0, 0, false);
         }
         
         // Check if this was a drag selection
@@ -157,8 +159,8 @@ void InputSystem::HandleMouseMotion(const SDL_MouseMotionEvent& event) {
     mMouseY = event.y;
     
     // Update drag selection box if dragging
-    if (mIsDragging && mRenderSystem != nullptr) {
-        mRenderSystem->SetDragSelectionBox(mDragStartX, mDragStartY, event.x, event.y, true);
+    if (mIsDragging && mRenderer != nullptr) {
+        mRenderer->SetDragSelectionBox(mDragStartX, mDragStartY, event.x, event.y, true);
     }
 }
 
@@ -169,7 +171,17 @@ void InputSystem::HandleKeyDown(const SDL_KeyboardEvent& event) {
     
     switch (event.keysym.sym) {
         case SDLK_ESCAPE:
-            mSelectedEntities.clear();
+            if (mGameStateManager != nullptr && mGameStateManager->GetCurrentState() == GameState::GameOver) {
+                // Restart the game
+                mGameStateManager->StartNewGame();
+                // Reset gameplay system state
+                if (mGameplaySystem != nullptr) {
+                    mGameplaySystem->ResetGameState();
+                }
+                SDL_Log("Game restart requested from game over screen");
+            } else {
+                mSelectedEntities.clear();
+            }
             break;
         case SDLK_SPACE:
             // Toggle pause/resume with spacebar
@@ -185,13 +197,20 @@ void InputSystem::HandleKeyDown(const SDL_KeyboardEvent& event) {
             if (IsKeyPressed(SDL_SCANCODE_LCTRL) || IsKeyPressed(SDL_SCANCODE_RCTRL)) {
                 // Select all player units that are alive
                 using namespace Components;
+                ClearAllSelections();
                 mSelectedEntities.clear();
                 mRegistry.ForEach<Spacecraft>([&](EntityID entity, const Spacecraft& spacecraft) {
                     auto* health = mRegistry.GetComponent<Health>(entity);
                     if (spacecraft.type == SpacecraftType::Player && health && health->isAlive) {
                         mSelectedEntities.push_back(entity);
+                        SetEntitySelected(entity, true);
                     }
                 });
+                
+                // Update UI with new selection count
+                if (mUISystem != nullptr) {
+                    mUISystem->UpdateSelectedCount(static_cast<int>(mSelectedEntities.size()));
+                }
             }
             break;
         default:
@@ -243,6 +262,11 @@ void InputSystem::HandleSelection(int mouseX, int mouseY, bool isCtrlHeld) {
         }
         
         SDL_Log("Selected %zu units", mSelectedEntities.size());
+        
+        // Update UI with new selection count
+        if (mUISystem != nullptr) {
+            mUISystem->UpdateSelectedCount(static_cast<int>(mSelectedEntities.size()));
+        }
     } else if (clickedPlanet != INVALID_ENTITY) {
         // Clear ship selections when selecting planets
         ClearAllSelections();
@@ -270,6 +294,7 @@ void InputSystem::HandleSelection(int mouseX, int mouseY, bool isCtrlHeld) {
         
         if (mUISystem != nullptr) {
             mUISystem->SetSelectedPlanet(INVALID_ENTITY);
+            mUISystem->UpdateSelectedCount(0);
         }
         
         SDL_Log("All selections cleared");
@@ -306,6 +331,11 @@ void InputSystem::HandleBoxSelection(int startX, int startY, int endX, int endY)
     }
     
     SDL_Log("Box selected %zu units", mSelectedEntities.size());
+    
+    // Update UI with new selection count
+    if (mUISystem != nullptr) {
+        mUISystem->UpdateSelectedCount(static_cast<int>(mSelectedEntities.size()));
+    }
 }
 
 void InputSystem::HandleMovement(int mouseX, int mouseY) {
@@ -320,14 +350,34 @@ void InputSystem::HandleMovement(int mouseX, int mouseY) {
     
     auto [worldX, worldY] = ScreenToWorld(mouseX, mouseY, windowWidth, windowHeight);
     
-    // Command selected units to move
-    using namespace Components;
-    for (EntityID entity : mSelectedEntities) {
-        if (auto* spacecraft = mRegistry.GetComponent<Spacecraft>(entity)) {
-            if (spacecraft->type == SpacecraftType::Player) {
-                spacecraft->destX = worldX;
-                spacecraft->destY = worldY;
-                spacecraft->isMoving = true;
+    // Check if there's an enemy at the clicked position (smart-click)
+    EntityID enemyTarget = FindEnemyAtPosition(worldX, worldY, ENEMY_CLICK_RADIUS);
+    
+    if (enemyTarget != INVALID_ENTITY) {
+        // Right-clicked on enemy - treat as attack command
+        using namespace Components;
+        for (EntityID entity : mSelectedEntities) {
+            if (auto* spacecraft = mRegistry.GetComponent<Spacecraft>(entity)) {
+                if (spacecraft->type == SpacecraftType::Player) {
+                    spacecraft->targetEntity = enemyTarget; // Set the target to pursue
+                    spacecraft->isMoving = true;
+                    spacecraft->isAttacking = true;
+                    SDL_Log("Unit %u ordered to attack and pursue enemy %u (smart-click)", entity, enemyTarget);
+                }
+            }
+        }
+    } else {
+        // Right-clicked on empty space - normal move command
+        using namespace Components;
+        for (EntityID entity : mSelectedEntities) {
+            if (auto* spacecraft = mRegistry.GetComponent<Spacecraft>(entity)) {
+                if (spacecraft->type == SpacecraftType::Player) {
+                    spacecraft->destX = worldX;
+                    spacecraft->destY = worldY;
+                    spacecraft->isMoving = true;
+                    spacecraft->isAttacking = false; // Clear attack mode
+                    spacecraft->targetEntity = INVALID_ENTITY; // Clear target
+                }
             }
         }
     }
@@ -349,16 +399,15 @@ void InputSystem::HandleAttackCommand(int mouseX, int mouseY) {
     EntityID target = FindEnemyAtPosition(worldX, worldY, ENEMY_CLICK_RADIUS);
     
     if (target != INVALID_ENTITY) {
-        // Command selected units to attack target
+        // Command selected units to attack the target entity
         using namespace Components;
         for (EntityID entity : mSelectedEntities) {
             if (auto* spacecraft = mRegistry.GetComponent<Spacecraft>(entity)) {
                 if (spacecraft->type == SpacecraftType::Player) {
-                    spacecraft->destX = worldX;
-                    spacecraft->destY = worldY;
+                    spacecraft->targetEntity = target; // Set the target to pursue
                     spacecraft->isMoving = true;
                     spacecraft->isAttacking = true;
-                    SDL_Log("Unit %u ordered to attack enemy at (%.2f, %.2f)", entity, worldX, worldY);
+                    SDL_Log("Unit %u ordered to attack and pursue enemy %u", entity, target);
                 }
             }
         }
@@ -433,11 +482,13 @@ EntityID InputSystem::FindEnemyAtPosition(float worldX, float worldY, float radi
     EntityID closestEntity = INVALID_ENTITY;
     float closestDistance = std::numeric_limits<float>::max();
     
-    // Only find enemy spacecraft
+    // Only find enemy spacecraft that are alive
     mRegistry.ForEach<Position>([&](EntityID entity, const Position& pos) {
         auto* spacecraft = mRegistry.GetComponent<Spacecraft>(entity);
-        if (!spacecraft || spacecraft->type != SpacecraftType::Enemy) {
-            return; // Skip non-enemy entities
+        auto* health = mRegistry.GetComponent<Health>(entity);
+        if (!spacecraft || spacecraft->type != SpacecraftType::Enemy || 
+            !health || !health->isAlive) {
+            return; // Skip non-enemy entities or dead enemies
         }
         
         float deltaX = pos.posX - worldX;

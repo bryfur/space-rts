@@ -6,7 +6,7 @@
 
 // Forward declarations
 class ECSRegistry;
-class RenderSystem;
+class Renderer;
 class MovementSystem;
 class CollisionSystem;
 class CombatSystem;
@@ -62,7 +62,7 @@ public:
 
     // Getters for subsystems
     ECSRegistry& GetECS() { return *mECS; }
-    RenderSystem& GetRenderer() { return *mRenderer; }
+    Renderer& GetRenderer() { return *mRenderer; }
     MovementSystem& GetMovementSystem() { return *mMovementSystem; }
     CollisionSystem& GetCollisionSystem() { return *mCollisionSystem; }
     CombatSystem& GetCombatSystem() { return *mCombatSystem; }
@@ -91,7 +91,7 @@ private:
     
     // Subsystems (using composition)
     std::unique_ptr<ECSRegistry> mECS;
-    std::unique_ptr<RenderSystem> mRenderer;
+    std::unique_ptr<Renderer> mRenderer;
     std::unique_ptr<MovementSystem> mMovementSystem;
     std::unique_ptr<CollisionSystem> mCollisionSystem;
     std::unique_ptr<CombatSystem> mCombatSystem;

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <vector>
+#include "../core/ECSRegistry.h"
 
 namespace Components {
 
@@ -39,6 +40,17 @@ enum class SpacecraftType : std::uint8_t {
 };
 
 /**
+ * @brief AI State enumeration for enemy spacecraft
+ */
+enum class AIState : std::uint8_t {
+    Search,      // Looking for targets or moving to strategic positions
+    Approach,    // Moving toward a target
+    Engage,      // In combat range, firing at targets
+    Retreat,     // Withdrawing due to low health or being outnumbered
+    Regroup      // Moving to rally point to join other units
+};
+
+/**
  * @brief Component for spacecraft entities
  */
 struct Spacecraft {
@@ -49,6 +61,12 @@ struct Spacecraft {
     bool isMoving = false;
     bool isAttacking = false;
     float lastShotTime = 0.0F;
+    EntityID targetEntity = INVALID_ENTITY; // Target entity to pursue and attack
+    
+    // AI state machine for enemy units
+    AIState aiState = AIState::Search;
+    float aiStateTimer = 0.0F; // Time spent in current state
+    EntityID aiTarget = INVALID_ENTITY; // Current AI target
 };
 
 /**
@@ -86,6 +104,7 @@ struct Projectile {
     float speed = 2.0F;
     float lifetime = 3.0F;
     std::uint32_t ownerId = 0;
+    std::uint32_t targetId = INVALID_ENTITY; // Specific target entity ID
     bool isActive = true;
 };
 
@@ -94,7 +113,7 @@ struct Projectile {
  */
 struct Selectable {
     bool isSelected = false;
-    float selectionRadius = 0.03F;
+    float selectionRadius = 0.03F; // Visual selection circle
 };
 
 /**

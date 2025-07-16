@@ -25,7 +25,6 @@ private:
     // Navigation helpers
     float CalculateAngleTo(float fromX, float fromY, float toX, float toY) const;
     float CalculateDistance(float x1, float y1, float x2, float y2) const;
-    EntityID FindNearestPlayerUnit(EntityID enemyEntity) const;
 
     // Movement constants
     static constexpr float SHIP_SPEED = 0.5F;

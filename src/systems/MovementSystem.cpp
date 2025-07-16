@@ -46,11 +46,79 @@ void MovementSystem::UpdateSpacecraftMovement(float deltaTime) {
         
         if (spacecraft.type == SpacecraftType::Player && spacecraft.isMoving) {
             // Player spacecraft movement
+            if (spacecraft.targetEntity != INVALID_ENTITY) {
+                // Pursuing a specific target entity
+                auto* targetPos = mRegistry.GetComponent<Position>(spacecraft.targetEntity);
+                auto* targetHealth = mRegistry.GetComponent<Health>(spacecraft.targetEntity);
+                
+                // Check if target is still valid and alive
+                if (!targetPos || !targetHealth || !targetHealth->isAlive) {
+                    // Target is dead or invalid, stop pursuing
+                    spacecraft.isMoving = false;
+                    spacecraft.targetEntity = INVALID_ENTITY;
+                    return;
+                }
+                
+                // Calculate distance to target
+                float distanceToTarget = CalculateDistance(position->posX, position->posY, targetPos->posX, targetPos->posY);
+                constexpr float PURSUIT_RANGE = 0.3F;
+                
+                if (distanceToTarget <= PURSUIT_RANGE) {
+                    // Stop moving, we're close enough to the target
+                    spacecraft.isMoving = false;
+                    // Face the target
+                    float deltaX = targetPos->posX - position->posX;
+                    float deltaY = targetPos->posY - position->posY;
+                    spacecraft.angle = (std::atan2(deltaY, deltaX) * 180.0F / 3.14159F) - 90.0F;
+                    return;
+                } else {
+                    // Continue pursuing the target
+                    float deltaX = targetPos->posX - position->posX;
+                    float deltaY = targetPos->posY - position->posY;
+                    float distance = distanceToTarget;
+                    
+                    // Normalize direction
+                    float dirX = deltaX / distance;
+                    float dirY = deltaY / distance;
+                    
+                    // Update position
+                    position->posX += dirX * SHIP_SPEED * deltaTime;
+                    position->posY += dirY * SHIP_SPEED * deltaTime;
+                    
+                    // Update angle to face movement direction
+                    spacecraft.angle = (std::atan2(dirY, dirX) * 180.0F / 3.14159F) - 90.0F;
+                }
+            } else {
+                // Regular movement to a position
+                float deltaX = spacecraft.destX - position->posX;
+                float deltaY = spacecraft.destY - position->posY;
+                float distance = CalculateDistance(position->posX, position->posY, spacecraft.destX, spacecraft.destY);
+                
+                // Check if we've arrived at destination
+                if (distance < ARRIVAL_THRESHOLD) {
+                    spacecraft.isMoving = false;
+                    return;
+                }
+                
+                // Normalize direction
+                float dirX = deltaX / distance;
+                float dirY = deltaY / distance;
+                
+                // Update position
+                position->posX += dirX * SHIP_SPEED * deltaTime;
+                position->posY += dirY * SHIP_SPEED * deltaTime;
+                
+                // Update angle to face movement direction
+                spacecraft.angle = (std::atan2(dirY, dirX) * 180.0F / 3.14159F) - 90.0F;
+            }
+        } 
+        else if (spacecraft.type == SpacecraftType::Enemy && spacecraft.isMoving) {
+            // AI-controlled movement to specific destination (set by CombatSystem)
             float deltaX = spacecraft.destX - position->posX;
             float deltaY = spacecraft.destY - position->posY;
             float distance = CalculateDistance(position->posX, position->posY, spacecraft.destX, spacecraft.destY);
             
-            // Check if we've arrived
+            // Check if we've arrived at destination
             if (distance < ARRIVAL_THRESHOLD) {
                 spacecraft.isMoving = false;
                 return;
@@ -64,38 +132,8 @@ void MovementSystem::UpdateSpacecraftMovement(float deltaTime) {
             position->posX += dirX * SHIP_SPEED * deltaTime;
             position->posY += dirY * SHIP_SPEED * deltaTime;
             
-            // Update angle to face movement direction (convert radians to degrees, adjust for triangle pointing up)
+            // Update angle to face movement direction
             spacecraft.angle = (std::atan2(dirY, dirX) * 180.0F / 3.14159F) - 90.0F;
-        } 
-        else if (spacecraft.type == SpacecraftType::Enemy) {
-            // Enemy AI: chase and attack nearest player unit
-            EntityID nearestPlayer = FindNearestPlayerUnit(entity);
-            if (nearestPlayer != INVALID_ENTITY) {
-                auto* targetPos = mRegistry.GetComponent<Position>(nearestPlayer);
-                if (targetPos) {
-                    float deltaX = targetPos->posX - position->posX;
-                    float deltaY = targetPos->posY - position->posY;
-                    float distance = std::sqrt((deltaX * deltaX) + (deltaY * deltaY));
-                    
-                    constexpr float ATTACK_RANGE = 0.12F;
-                    constexpr float CHASE_SPEED = SHIP_SPEED * 0.8F; // Slightly slower than player ships
-                    
-                    if (distance > ATTACK_RANGE) {
-                        // Chase the player
-                        float dirX = deltaX / distance;
-                        float dirY = deltaY / distance;
-                        
-                        position->posX += dirX * CHASE_SPEED * deltaTime;
-                        position->posY += dirY * CHASE_SPEED * deltaTime;
-                        
-                        // Point toward target
-                        spacecraft.angle = (std::atan2(dirY, dirX) * 180.0F / 3.14159F) - 90.0F;
-                    } else {
-                        // In range - stop and face target for firing
-                        spacecraft.angle = (std::atan2(deltaY, deltaX) * 180.0F / 3.14159F) - 90.0F;
-                    }
-                }
-            }
         }
         
         // For all ships: if they moved this frame, update their angle to face movement direction
@@ -213,39 +251,4 @@ float MovementSystem::CalculateDistance(float startX, float startY, float endX, 
     float deltaX = endX - startX;
     float deltaY = endY - startY;
     return std::sqrt(deltaX * deltaX + deltaY * deltaY);
-}
-
-EntityID MovementSystem::FindNearestPlayerUnit(EntityID enemyEntity) const {
-    using namespace Components;
-    
-    auto* enemyPos = mRegistry.GetComponent<Position>(enemyEntity);
-    if (!enemyPos) {
-        return INVALID_ENTITY;
-    }
-    
-    EntityID nearestPlayer = INVALID_ENTITY;
-    float nearestDistance = 1000.0F; // Large initial value
-    
-    mRegistry.ForEach<Spacecraft>([&](EntityID entity, const Spacecraft& spacecraft) {
-        if (spacecraft.type != SpacecraftType::Player || entity == enemyEntity) {
-            return;
-        }
-        
-        auto* playerPos = mRegistry.GetComponent<Position>(entity);
-        auto* playerHealth = mRegistry.GetComponent<Health>(entity);
-        
-        if (!playerPos || !playerHealth || !playerHealth->isAlive) {
-            return;
-        }
-        
-        float distance = CalculateDistance(enemyPos->posX, enemyPos->posY, 
-                                         playerPos->posX, playerPos->posY);
-        
-        if (distance < nearestDistance) {
-            nearestDistance = distance;
-            nearestPlayer = entity;
-        }
-    });
-    
-    return nearestPlayer;
 }

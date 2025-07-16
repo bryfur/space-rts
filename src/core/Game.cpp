@@ -1,6 +1,6 @@
 #include "Game.h"
 #include "../components/Components.h"
-#include "../systems/RenderSystem.h"
+#include "../rendering/Renderer.h"
 #include "../systems/MovementSystem.h"
 #include "../systems/CollisionSystem.h"
 #include "../systems/CombatSystem.h"
@@ -65,7 +65,7 @@ bool Game::Initialize() {
 
     // Initialize subsystems
     mECS = std::make_unique<ECSRegistry>();
-    mRenderer = std::make_unique<RenderSystem>(*mECS);
+    mRenderer = std::make_unique<Renderer>(*mECS);
     mMovementSystem = std::make_unique<MovementSystem>(*mECS);
     mCollisionSystem = std::make_unique<CollisionSystem>(*mECS);
     mCombatSystem = std::make_unique<CombatSystem>(*mECS);
@@ -120,9 +120,12 @@ bool Game::Initialize() {
     mCombatSystem->SetAudioManager(mAudioManager.get());
     mCollisionSystem->SetAudioManager(mAudioManager.get());
     mInputSystem->SetGameStateManager(mGameStateManager.get());
-    mInputSystem->SetRenderSystem(mRenderer.get());
+    mGameplaySystem->SetGameStateManager(mGameStateManager.get());
+    mInputSystem->SetRenderer(mRenderer.get());
     mInputSystem->SetUISystem(mUISystem.get());
-    mUISystem->SetRenderSystem(mRenderer.get());
+    mInputSystem->SetGameplaySystem(mGameplaySystem.get());
+    mUISystem->SetRenderer(mRenderer.get());
+    mUISystem->SetGameStateManager(mGameStateManager.get());
     
     // Start background music
     mAudioManager->PlayBackgroundMusic();

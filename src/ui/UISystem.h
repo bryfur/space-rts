@@ -3,9 +3,10 @@
 #include "../core/ECSRegistry.h"
 #include "../core/SystemBase.h"
 #include "../components/Components.h"
+#include <vector>
 
 // Forward declarations
-class RenderSystem;
+class Renderer;
 
 /**
  * @brief UI system with build interface
@@ -22,13 +23,15 @@ public:
 
     // UI rendering
     void RenderUI();
-    void SetRenderSystem(RenderSystem* renderSystem) { mRenderSystem = renderSystem; }
+    void RenderGameOverScreen();
+    void SetRenderer(Renderer* renderer) { mRenderer = renderer; }
 
     // UI state management  
     void ShowGameUI(bool show);
     void UpdateGameTime(float gameTime);
     void UpdateSelectedCount(int count);
     void SetSelectedPlanet(EntityID planet);
+    void SetGameStateManager(class GameStateManager* gameStateManager);
 
     // UI queries
     bool IsUIVisible() const { return mShowUI; }
@@ -46,9 +49,15 @@ private:
     void RenderBuildButton(float x, float y, float width, float height, 
                           Components::BuildableUnit unitType, int queueCount);
     void RenderGameInfo();
-    void DrawGridBorder(float x, float y, float size);
-    void RenderBuildIcon(float x, float y, float size, Components::BuildableUnit unitType, int queueCount);
-    void RenderEmptyIcon(float x, float y, float size);
+    void RenderUnitSelectionPanel();
+    
+    // Unit selection tracking
+    struct SelectedUnitGroup {
+        Components::SpacecraftType unitType;
+        int count;
+        float averageHealth;
+    };
+    std::vector<SelectedUnitGroup> GetSelectedUnitGroups() const;
     
     // Build queue management
     void AddToBuildQueue(EntityID planet, Components::BuildableUnit unitType);
@@ -60,7 +69,8 @@ private:
     float mGameTime;
     int mSelectedCount;
     EntityID mSelectedPlanet;
-    RenderSystem* mRenderSystem = nullptr;
+    Renderer* mRenderer = nullptr;
+    class GameStateManager* mGameStateManager = nullptr;
     
     // UI layout constants
     static constexpr float UI_MARGIN = 0.02F;

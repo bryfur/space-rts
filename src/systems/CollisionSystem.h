@@ -25,6 +25,7 @@ public:
 private:
     // Collision detection
     void CheckProjectileCollisions();
+    void CheckProjectilePlanetCollisions();
     void CheckShipCollisions();
     void CheckPlanetCollisions();
     

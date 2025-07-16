@@ -8,8 +8,9 @@
 
 // Forward declaration
 class GameStateManager;
-class RenderSystem;
+class Renderer;
 class UISystem;
+class GameplaySystem;
 
 /**
  * @brief Professional input system
@@ -22,11 +23,14 @@ public:
     // Set game state manager for pause/resume functionality
     void SetGameStateManager(GameStateManager* gameStateManager) { mGameStateManager = gameStateManager; }
 
-    // Set render system for visual feedback
-    void SetRenderSystem(RenderSystem* renderSystem) { mRenderSystem = renderSystem; }
+    // Set renderer for visual feedback
+    void SetRenderer(Renderer* renderer) { mRenderer = renderer; }
 
     // Set UI system for interaction
     void SetUISystem(UISystem* uiSystem) { mUISystem = uiSystem; }
+
+    // Set gameplay system for game state resets
+    void SetGameplaySystem(GameplaySystem* gameplaySystem) { mGameplaySystem = gameplaySystem; }
 
     // SystemBase interface
     bool Initialize() override;
@@ -92,16 +96,19 @@ private:
     // Game state integration
     GameStateManager* mGameStateManager;
 
-    // Render system integration
-    RenderSystem* mRenderSystem = nullptr;
+    // Renderer integration
+    Renderer* mRenderer = nullptr;
 
     // UI system integration
     UISystem* mUISystem = nullptr;
 
+    // Gameplay system integration
+    GameplaySystem* mGameplaySystem = nullptr;
+
     // Constants
-    static constexpr float SHIP_CLICK_RADIUS = 0.03F;
-    static constexpr float ENEMY_CLICK_RADIUS = 0.06F;
-    static constexpr float PLANET_CLICK_RADIUS = 0.15F;
+    static constexpr float SHIP_CLICK_RADIUS = 0.06F; // Increased for easier targeting
+    static constexpr float ENEMY_CLICK_RADIUS = 0.12F; // Increased for easier targeting
+    static constexpr float PLANET_CLICK_RADIUS = 0.18F; // Slightly increased
     static constexpr int MIN_DRAG_DISTANCE = 5;
     static constexpr float WORLD_X_SCALE = 2.0F;
     static constexpr float WORLD_X_OFFSET = 1.0F;

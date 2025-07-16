@@ -1,22 +1,23 @@
 #pragma once
 
 #include "../core/ECSRegistry.h"
-#include "../core/SystemBase.h"
+#include "../components/Components.h"
 #include <string>
 
 /**
- * @brief Professional rendering system using modern OpenGL practices
+ * @brief Professional renderer using modern OpenGL practices
+ * 
+ * This is a pure rendering service, not an ECS system.
+ * It handles all graphics rendering without needing regular updates.
  */
-class RenderSystem : public SystemBase {
+class Renderer {
 public:
-    explicit RenderSystem(ECSRegistry& registry);
-    ~RenderSystem() override;
+    explicit Renderer(ECSRegistry& registry);
+    ~Renderer();
 
-    // SystemBase interface
+    // Core lifecycle
     bool Initialize(int windowWidth, int windowHeight);
-    bool Initialize() override { return true; } // Required by SystemBase
-    void Update(float deltaTime) override;
-    void Shutdown() override;
+    void Shutdown();
 
     // Rendering interface
     void BeginFrame();
@@ -44,7 +45,19 @@ public:
     // Selection box interface
     void SetDragSelectionBox(int startX, int startY, int endX, int endY, bool active);
 
+    // UI rendering interface
+    void DrawGridBorder(float posX, float posY, float size);
+    void RenderBuildIcon(float posX, float posY, float size, Components::BuildableUnit unitType, int queueCount);
+    void RenderEmptyIcon(float posX, float posY, float size);
+    
+    // Unit selection panel
+    void RenderUnitSelectionPanel(float posX, float posY, float width, float height);
+    void RenderSelectedUnitIcon(float posX, float posY, float size, Components::SpacecraftType unitType, int count, float healthPercent);
+
 private:
+    // Helper functions
+    std::string GetAIStateString(Components::AIState state) const;
+    
     // Core rendering
     void SetupOpenGL();
     void RenderSpacecraft();
@@ -62,6 +75,9 @@ private:
     bool InitializeTextRendering();
     void CleanupTextRendering();
 
+    // ECS registry reference
+    ECSRegistry& mRegistry;
+
     // Window properties
     int mWindowWidth;
     int mWindowHeight;
@@ -71,7 +87,7 @@ private:
     
     // Drag selection box state
     bool mDragSelectionActive = false;
-    int mDragStartX = 0;
+    int mDragStartX = 0; 
     int mDragStartY = 0; 
     int mDragEndX = 0;
     int mDragEndY = 0;

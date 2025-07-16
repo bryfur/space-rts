@@ -25,6 +25,7 @@ void CollisionSystem::Update(float deltaTime) {
     (void)deltaTime; // Suppress unused parameter warning
     
     CheckProjectileCollisions();
+    CheckProjectilePlanetCollisions();
     // Disabled: CheckShipCollisions();
     // Disabled: CheckPlanetCollisions();
 }
@@ -57,12 +58,24 @@ void CollisionSystem::CheckProjectileCollisions() {
                 return;
             }
             
+            // Skip dead ships
+            auto* shipHealth = mRegistry.GetComponent<Health>(shipEntity);
+            if (!shipHealth || !shipHealth->isAlive) {
+                return;
+            }
+            
             // Don't let projectiles hit their owner
             if (projectile.ownerId == shipEntity) {
                 return;
             }
             
-            // Check collision
+            // Let projectiles pass through friendly ships - only check collision with enemies
+            auto* ownerSpacecraft = mRegistry.GetComponent<Spacecraft>(projectile.ownerId);
+            if (ownerSpacecraft && ownerSpacecraft->type == spacecraft.type) {
+                return; // Same team, projectile passes through
+            }
+            
+            // Check collision only with enemy ships
             if (CheckCircleCollision(
                 projectilePos->posX, projectilePos->posY, PROJECTILE_COLLISION_RADIUS,
                 shipPos->posX, shipPos->posY, SHIP_COLLISION_RADIUS)) {
@@ -75,6 +88,64 @@ void CollisionSystem::CheckProjectileCollisions() {
     // Process all collisions after iteration is complete
     for (const auto& [projectileEntity, shipEntity] : collisions) {
         HandleProjectileHit(projectileEntity, shipEntity);
+    }
+}
+
+void CollisionSystem::CheckProjectilePlanetCollisions() {
+    using namespace Components;
+    
+    // Collect projectiles to destroy to avoid iterator invalidation
+    std::vector<EntityID> projectilesToDestroy;
+    std::vector<std::pair<EntityID, EntityID>> collisions; // projectile, planet
+    
+    // Check projectiles against planets
+    mRegistry.ForEach<Projectile>([&](EntityID projectileEntity, const Projectile& projectile) {
+        if (!projectile.isActive) {
+            return;
+        }
+        
+        auto* projectilePos = mRegistry.GetComponent<Position>(projectileEntity);
+        if (!projectilePos) {
+            return;
+        }
+        
+        mRegistry.ForEach<Planet>([&](EntityID planetEntity, const Planet& planet) {
+            auto* planetPos = mRegistry.GetComponent<Position>(planetEntity);
+            if (!planetPos) {
+                return;
+            }
+            
+            // Skip dead planets
+            auto* planetHealth = mRegistry.GetComponent<Health>(planetEntity);
+            if (!planetHealth || !planetHealth->isAlive) {
+                return;
+            }
+            
+            // Don't let projectiles hit their owner's planet
+            auto* ownerSpacecraft = mRegistry.GetComponent<Spacecraft>(projectile.ownerId);
+            if (ownerSpacecraft && planet.isPlayerOwned == (ownerSpacecraft->type == SpacecraftType::Player)) {
+                return; // Same team, projectile passes through
+            }
+            
+            // Only collide with planets if they are the specific target
+            // If no specific target (INVALID_ENTITY), projectiles pass through planets
+            if (projectile.targetId != planetEntity) {
+                return; // Not targeting this planet, projectile passes through
+            }
+            
+            // Check collision with planet
+            if (CheckCircleCollision(
+                projectilePos->posX, projectilePos->posY, PROJECTILE_COLLISION_RADIUS,
+                planetPos->posX, planetPos->posY, planet.radius)) {
+                
+                collisions.emplace_back(projectileEntity, planetEntity);
+            }
+        });
+    });
+    
+    // Process all collisions after iteration is complete
+    for (const auto& [projectileEntity, planetEntity] : collisions) {
+        HandleProjectileHit(projectileEntity, planetEntity);
     }
 }
 

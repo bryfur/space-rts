@@ -1,9 +1,12 @@
 #include "UISystem.h"
-#include "../systems/RenderSystem.h"
+#include "../rendering/Renderer.h"
+#include "../core/GameStateManager.h"
 #include <SDL2/SDL_log.h>
 #include <SDL2/SDL_mouse.h>
-#include <GL/gl.h>
 #include <algorithm>
+#include <map>
+#include <cmath>
+#include <cstdlib>
 
 UISystem::UISystem(ECSRegistry& registry)
     : SystemBase(registry)
@@ -47,7 +50,13 @@ void UISystem::Shutdown() {
 }
 
 void UISystem::RenderUI() {
-    if (!mShowUI || mRenderSystem == nullptr) {
+    if (!mShowUI || mRenderer == nullptr) {
+        return;
+    }
+    
+    // Check if game is over and render game over screen
+    if (mGameStateManager != nullptr && mGameStateManager->GetCurrentState() == GameState::GameOver) {
+        RenderGameOverScreen();
         return;
     }
     
@@ -55,6 +64,11 @@ void UISystem::RenderUI() {
     
     if (mSelectedPlanet != INVALID_ENTITY) {
         RenderBuildInterface();
+    }
+    
+    // Render unit selection panel if units are selected
+    if (mSelectedCount > 0) {
+        RenderUnitSelectionPanel();
     }
 }
 
@@ -77,6 +91,10 @@ void UISystem::SetSelectedPlanet(EntityID planet) {
     } else {
         SDL_Log("UI: Planet selection cleared");
     }
+}
+
+void UISystem::SetGameStateManager(GameStateManager* gameStateManager) {
+    mGameStateManager = gameStateManager;
 }
 
 void UISystem::HandleUIClick(int mouseX, int mouseY) {
@@ -106,7 +124,7 @@ bool UISystem::IsClickInBuildInterface(int mouseX, int mouseY) const {
     
     // Grid layout parameters (matching RenderBuildInterface)
     constexpr float PANEL_X = 0.55F;
-    constexpr float PANEL_Y = -0.4F;  // Updated to match new position
+    constexpr float PANEL_Y = -0.5F;  // Updated to align bottom borders
     constexpr float GRID_SIZE = 0.4F;
     constexpr float ICON_SIZE = 0.18F;
     
@@ -139,22 +157,32 @@ void UISystem::RenderBuildInterface() {
     
     // Get planet component to check build queue
     auto* planet = mRegistry.GetComponent<Components::Planet>(mSelectedPlanet);
+    auto* planetHealth = mRegistry.GetComponent<Components::Health>(mSelectedPlanet);
+    
     if (planet == nullptr || !planet->isPlayerOwned) {
         return;
     }
     
-    // Position build interface at bottom-right but not obscured
+    // Position build interface so bottom border aligns with selection panel
     float panelX = 0.55F;  // Right side
-    float panelY = -0.4F;  // Move up from bottom edge to avoid obscuring
+    float panelY = -0.5F;  // Adjusted so bottom borders align at same level
     constexpr float GRID_SIZE = 0.4F;
     constexpr float ICON_SIZE = 0.18F;  // Make icons larger to fill grid cells
     constexpr float ICON_SPACING = 0.2F;  // Match grid cell size
     
-    // Draw grid border
-    DrawGridBorder(panelX, panelY, GRID_SIZE);
+    // Draw grid border using Renderer
+    mRenderer->DrawGridBorder(panelX, panelY, GRID_SIZE);
+    
+    // Check if planet is destroyed
+    if (planetHealth == nullptr || !planetHealth->isAlive) {
+        // Show destruction message instead of build options
+        mRenderer->RenderText("PLANET DESTROYED", panelX + 0.05F, panelY + 0.25F, 0.025F, 1.0F, 0.0F, 0.0F);
+        mRenderer->RenderText("CANNOT BUILD", panelX + 0.05F, panelY + 0.0F, 0.025F, 1.0F, 0.0F, 0.0F);
+        return;
+    }
     
     // Draw title above the grid
-    mRenderSystem->RenderText("BUILD MENU", panelX + 0.05F, panelY + 0.25F, 0.025F, 1.0F, 1.0F, 1.0F);
+    mRenderer->RenderText("BUILD MENU", panelX + 0.05F, panelY + 0.25F, 0.025F, 1.0F, 1.0F, 1.0F);
     
     // Center icons in grid cells - align with grid lines
     float cellSize = GRID_SIZE / 2;  // 2x2 grid
@@ -163,190 +191,74 @@ void UISystem::RenderBuildInterface() {
     
     // Icon 1: Spacecraft (top-left cell)
     int spacecraftQueueCount = GetBuildQueueCount(mSelectedPlanet, Components::BuildableUnit::Spacecraft);
-    RenderBuildIcon(startX, startY, ICON_SIZE, Components::BuildableUnit::Spacecraft, spacecraftQueueCount);
+    mRenderer->RenderBuildIcon(startX, startY, ICON_SIZE, Components::BuildableUnit::Spacecraft, spacecraftQueueCount);
     
     // Icon 2: Reserved for future units (top-right cell)
-    RenderEmptyIcon(startX + cellSize, startY, ICON_SIZE);
+    mRenderer->RenderEmptyIcon(startX + cellSize, startY, ICON_SIZE);
     
     // Icon 3: Reserved for future units (bottom-left cell)
-    RenderEmptyIcon(startX, startY - cellSize, ICON_SIZE);
+    mRenderer->RenderEmptyIcon(startX, startY - cellSize, ICON_SIZE);
     
     // Icon 4: Reserved for future units (bottom-right cell)
-    RenderEmptyIcon(startX + cellSize, startY - cellSize, ICON_SIZE);
+    mRenderer->RenderEmptyIcon(startX + cellSize, startY - cellSize, ICON_SIZE);
     
     // Show build progress below the grid
     if (!planet->buildQueue.empty()) {
         auto& currentBuild = planet->buildQueue.front();
         float progress = (currentBuild.totalBuildTime - currentBuild.timeRemaining) / currentBuild.totalBuildTime * 100.0F;
         std::string progressText = "Building: " + std::to_string(static_cast<int>(progress)) + "%";
-        mRenderSystem->RenderText(progressText, panelX + 0.05F, panelY - 0.25F, 0.025F, 0.0F, 1.0F, 0.0F);
+        mRenderer->RenderText(progressText, panelX + 0.05F, panelY - 0.25F, 0.025F, 0.0F, 1.0F, 0.0F);
     }
 }
 
 void UISystem::RenderBuildButton(float posX, float posY, float width, float height, 
                                 Components::BuildableUnit unitType, int queueCount) {
-    if (mRenderSystem == nullptr) {
+    if (mRenderer == nullptr) {
         return;
     }
     
     // Render button background using text characters
-    mRenderSystem->RenderText("[                ]", posX - 0.05F, posY, 0.04F, 0.5F, 0.5F, 0.5F);
+    mRenderer->RenderText("[                ]", posX - 0.05F, posY, 0.04F, 0.5F, 0.5F, 0.5F);
     
     // Render button icon/text
-    mRenderSystem->RenderText("[ BUILD SHIP ]", posX, posY, 0.035F, 1.0F, 1.0F, 1.0F);
+    mRenderer->RenderText("[ BUILD SHIP ]", posX, posY, 0.035F, 1.0F, 1.0F, 1.0F);
     
     // Render queue count prominently
     if (queueCount > 0) {
         std::string queueText = "Queue: " + std::to_string(queueCount);
-        mRenderSystem->RenderText(queueText, posX, posY - 0.08F, 0.03F, 1.0F, 1.0F, 0.0F);
+        mRenderer->RenderText(queueText, posX, posY - 0.08F, 0.03F, 1.0F, 1.0F, 0.0F);
     }
     
     // Add instructions
-    mRenderSystem->RenderText("Click to build", posX, posY - 0.15F, 0.025F, 0.7F, 0.7F, 0.7F);
+    mRenderer->RenderText("Click to build", posX, posY - 0.15F, 0.025F, 0.7F, 0.7F, 0.7F);
 }
 
 void UISystem::RenderGameInfo() {
-    if (mRenderSystem == nullptr) {
+    if (mRenderer == nullptr) {
         return;
     }
     
     // Render game time and selected count in top-left
     std::string timeText = "Time: " + std::to_string(static_cast<int>(mGameTime));
-    mRenderSystem->RenderText(timeText, -0.95F, 0.9F, UI_TEXT_SIZE, 1.0F, 1.0F, 1.0F);
+    mRenderer->RenderText(timeText, -0.95F, 0.9F, UI_TEXT_SIZE, 1.0F, 1.0F, 1.0F);
     
     if (mSelectedCount > 0) {
         std::string selectionText = "Selected: " + std::to_string(mSelectedCount);
-        mRenderSystem->RenderText(selectionText, -0.95F, 0.85F, UI_TEXT_SIZE, 1.0F, 1.0F, 1.0F);
+        mRenderer->RenderText(selectionText, -0.95F, 0.85F, UI_TEXT_SIZE, 1.0F, 1.0F, 1.0F);
     }
-}
-
-void UISystem::DrawGridBorder(float x, float y, float size) {
-    if (mRenderSystem == nullptr) {
-        return;
-    }
-    
-    // Draw grid border using OpenGL rectangles
-    glColor3f(1.0F, 1.0F, 0.0F); // Yellow border
-    glLineWidth(2.0F);
-    
-    // Draw border rectangle
-    glBegin(GL_LINE_LOOP);
-    glVertex2f(x, y + size/2);
-    glVertex2f(x + size, y + size/2);
-    glVertex2f(x + size, y - size/2);
-    glVertex2f(x, y - size/2);
-    glEnd();
-    
-    // Draw grid lines
-    glLineWidth(1.0F);
-    glColor3f(0.5F, 0.5F, 0.0F); // Darker yellow for grid
-    
-    // Vertical line
-    glBegin(GL_LINES);
-    glVertex2f(x + size/2, y + size/2);
-    glVertex2f(x + size/2, y - size/2);
-    glEnd();
-    
-    // Horizontal line  
-    glBegin(GL_LINES);
-    glVertex2f(x, y);
-    glVertex2f(x + size, y);
-    glEnd();
-}
-
-void UISystem::RenderBuildIcon(float x, float y, float size, Components::BuildableUnit unitType, int queueCount) {
-    if (mRenderSystem == nullptr) {
-        return;
-    }
-    
-    // Draw icon background (filled rectangle)
-    glColor3f(0.3F, 0.3F, 0.3F); // Dark gray background
-    glBegin(GL_QUADS);
-    glVertex2f(x - size/2, y + size/2);
-    glVertex2f(x + size/2, y + size/2);
-    glVertex2f(x + size/2, y - size/2);
-    glVertex2f(x - size/2, y - size/2);
-    glEnd();
-    
-    // Draw icon border
-    glColor3f(0.6F, 0.6F, 0.6F); // Light gray border
-    glLineWidth(2.0F);
-    glBegin(GL_LINE_LOOP);
-    glVertex2f(x - size/2, y + size/2);
-    glVertex2f(x + size/2, y + size/2);
-    glVertex2f(x + size/2, y - size/2);
-    glVertex2f(x - size/2, y - size/2);
-    glEnd();
-    
-    switch (unitType) {
-        case Components::BuildableUnit::Spacecraft:
-            // Draw triangle icon (like spacecraft) - filled triangle
-            glColor3f(1.0F, 1.0F, 0.2F); // Yellow triangle
-            glBegin(GL_TRIANGLES);
-            glVertex2f(x, y + size/3);          // Top point
-            glVertex2f(x - size/4, y - size/3); // Bottom left
-            glVertex2f(x + size/4, y - size/3); // Bottom right
-            glEnd();
-            
-            // Draw triangle outline
-            glColor3f(1.0F, 0.8F, 0.0F); // Darker yellow outline
-            glLineWidth(1.5F);
-            glBegin(GL_LINE_LOOP);
-            glVertex2f(x, y + size/3);
-            glVertex2f(x - size/4, y - size/3);
-            glVertex2f(x + size/4, y - size/3);
-            glEnd();
-            break;
-        default:
-            // Draw question mark or placeholder
-            glColor3f(0.7F, 0.7F, 0.7F);
-            mRenderSystem->RenderText("?", x - 0.01F, y, 0.025F, 0.7F, 0.7F, 0.7F);
-            break;
-    }
-    
-    // Show queue count if any
-    if (queueCount > 0) {
-        std::string queueText = std::to_string(queueCount);
-        mRenderSystem->RenderText(queueText, x + size/3, y + size/3, 0.02F, 1.0F, 1.0F, 0.0F);
-    }
-}
-
-void UISystem::RenderEmptyIcon(float x, float y, float size) {
-    if (mRenderSystem == nullptr) {
-        return;
-    }
-    
-    // Draw empty icon slot background
-    glColor3f(0.2F, 0.2F, 0.2F); // Very dark gray background
-    glBegin(GL_QUADS);
-    glVertex2f(x - size/2, y + size/2);
-    glVertex2f(x + size/2, y + size/2);
-    glVertex2f(x + size/2, y - size/2);
-    glVertex2f(x - size/2, y - size/2);
-    glEnd();
-    
-    // Draw empty icon border (dashed effect using smaller rectangles)
-    glColor3f(0.4F, 0.4F, 0.4F); // Gray border
-    glLineWidth(1.0F);
-    glBegin(GL_LINE_LOOP);
-    glVertex2f(x - size/2, y + size/2);
-    glVertex2f(x + size/2, y + size/2);
-    glVertex2f(x + size/2, y - size/2);
-    glVertex2f(x - size/2, y - size/2);
-    glEnd();
-    
-    // Draw dash in center to indicate empty slot
-    glColor3f(0.4F, 0.4F, 0.4F);
-    glLineWidth(3.0F);
-    glBegin(GL_LINES);
-    glVertex2f(x - size/4, y);
-    glVertex2f(x + size/4, y);
-    glEnd();
 }
 
 void UISystem::AddToBuildQueue(EntityID planet, Components::BuildableUnit unitType) {
     auto* planetComp = mRegistry.GetComponent<Components::Planet>(planet);
+    auto* planetHealth = mRegistry.GetComponent<Components::Health>(planet);
+    
     if (planetComp == nullptr || !planetComp->isPlayerOwned) {
+        return;
+    }
+    
+    // Check if planet is destroyed - prevent building
+    if (planetHealth == nullptr || !planetHealth->isAlive) {
+        SDL_Log("Cannot build - planet is destroyed!");
         return;
     }
     
@@ -378,14 +290,145 @@ void UISystem::CompleteBuild(EntityID planet, Components::BuildableUnit unitType
             return;
         }
         
-        // Create new spacecraft near the planet
+        // Create new spacecraft at random position near the planet
         EntityID newShip = mRegistry.CreateEntity();
-        mRegistry.AddComponent<Components::Position>(newShip, {position->posX + 0.1F, position->posY + 0.1F});
+        
+        // Generate random position around planet
+        constexpr float MIN_DISTANCE = 0.12F; // Minimum distance from planet center
+        constexpr float MAX_DISTANCE = 0.25F; // Maximum distance from planet center
+        
+        // Random angle (0 to 2π)
+        float angle = static_cast<float>(rand()) / static_cast<float>(RAND_MAX) * 2.0F * 3.14159F;
+        
+        // Random distance between min and max
+        float distance = MIN_DISTANCE + (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * (MAX_DISTANCE - MIN_DISTANCE);
+        
+        // Calculate spawn position
+        float spawnX = position->posX + std::cos(angle) * distance;
+        float spawnY = position->posY + std::sin(angle) * distance;
+        
+        mRegistry.AddComponent<Components::Position>(newShip, {spawnX, spawnY});
         mRegistry.AddComponent<Components::Spacecraft>(newShip, {Components::SpacecraftType::Player, 0.0F, 0.0F, 0.0F, false, false, 0.0F});
         mRegistry.AddComponent<Components::Health>(newShip, {10, 10, true});
-        mRegistry.AddComponent<Components::Selectable>(newShip, {false, 0.03F});
+        mRegistry.AddComponent<Components::Selectable>(newShip, {false, 0.04F}); // Original size
         mRegistry.AddComponent<Components::Renderable>(newShip, {1.0F, 0.8F, 0.2F, 1.0F, 1.0F});
         
         SDL_Log("Spacecraft built and deployed from planet %u", planet);
     }
+}
+
+void UISystem::RenderUnitSelectionPanel() {
+    auto selectedGroups = GetSelectedUnitGroups();
+    if (selectedGroups.empty()) {
+        return;
+    }
+        
+    // Position panel at bottom center
+    constexpr float PANEL_Y = -0.6F; // Bottom area
+    constexpr float PANEL_WIDTH = 0.8F;
+    constexpr float PANEL_HEIGHT = 0.2F;
+    constexpr float ICON_SIZE = 0.12F;
+    constexpr float ICON_SPACING = 0.15F;
+    
+    // Render panel background
+    mRenderer->RenderUnitSelectionPanel(0.0F, PANEL_Y, PANEL_WIDTH, PANEL_HEIGHT);
+    
+    // Calculate starting position for icons (centered)
+    float totalWidth = static_cast<float>(selectedGroups.size()) * ICON_SPACING;
+    float startX = -totalWidth / 2.0F + ICON_SPACING / 2.0F;
+    
+    // Render unit icons
+    for (size_t i = 0; i < selectedGroups.size(); ++i) {
+        const auto& group = selectedGroups[i];
+        float iconX = startX + static_cast<float>(i) * ICON_SPACING;
+        mRenderer->RenderSelectedUnitIcon(iconX, PANEL_Y, ICON_SIZE, group.unitType, group.count, group.averageHealth);
+    }
+}
+
+std::vector<UISystem::SelectedUnitGroup> UISystem::GetSelectedUnitGroups() const {
+    std::vector<SelectedUnitGroup> groups;
+    std::map<Components::SpacecraftType, SelectedUnitGroup> groupMap;
+    
+    using namespace Components;
+    
+    // Iterate through all spacecraft to find selected ones
+    mRegistry.ForEach<Spacecraft>([&](EntityID entity, const Spacecraft& spacecraft) {
+        auto* selectable = mRegistry.GetComponent<Selectable>(entity);
+        auto* health = mRegistry.GetComponent<Health>(entity);
+        
+        if (!selectable || !selectable->isSelected || !health || !health->isAlive) {
+            return;
+        }
+        
+        // Find or create group for this unit type
+        auto it = groupMap.find(spacecraft.type);
+        if (it == groupMap.end()) {
+            SelectedUnitGroup newGroup;
+            newGroup.unitType = spacecraft.type;
+            newGroup.count = 1;
+            newGroup.averageHealth = static_cast<float>(health->currentHP) / static_cast<float>(health->maxHP);
+            groupMap[spacecraft.type] = newGroup;
+        } else {
+            // Update existing group
+            float currentAverage = it->second.averageHealth;
+            int currentCount = it->second.count;
+            float newHealthPercent = static_cast<float>(health->currentHP) / static_cast<float>(health->maxHP);
+            
+            // Calculate new average health
+            it->second.averageHealth = (currentAverage * static_cast<float>(currentCount) + newHealthPercent) / static_cast<float>(currentCount + 1);
+            it->second.count++;
+        }
+    });
+    
+    // Convert map to vector
+    for (const auto& pair : groupMap) {
+        groups.push_back(pair.second);
+    }
+    
+    return groups;
+}
+
+void UISystem::RenderGameOverScreen() {
+    if (mRenderer == nullptr || mGameStateManager == nullptr) {
+        return;
+    }
+    
+    // Check if game is over
+    if (mGameStateManager->GetCurrentState() != GameState::GameOver) {
+        return;
+    }
+    
+    // Render dark overlay using the UI panel renderer
+    mRenderer->RenderUnitSelectionPanel(0.0F, 0.0F, 2.0F, 1.5F);
+    
+    // Game Over title
+    mRenderer->RenderText("GAME OVER", -0.2F, 0.3F, 0.08F, 1.0F, 0.2F, 0.2F);
+    
+    // Defeat message
+    mRenderer->RenderText("All planets destroyed!", -0.25F, 0.15F, 0.04F, 1.0F, 1.0F, 1.0F);
+    
+    // Game statistics
+    char statsText[256];
+    
+    // Survival time
+    float survivalTime = mGameStateManager->GetGameTime();
+    int minutes = static_cast<int>(survivalTime) / 60;
+    int seconds = static_cast<int>(survivalTime) % 60;
+    snprintf(statsText, sizeof(statsText), "Survival Time: %d:%02d", minutes, seconds);
+    mRenderer->RenderText(statsText, -0.15F, 0.0F, 0.03F, 0.8F, 0.8F, 0.8F);
+    
+    // Score
+    snprintf(statsText, sizeof(statsText), "Final Score: %u", mGameStateManager->GetScore());
+    mRenderer->RenderText(statsText, -0.15F, -0.05F, 0.03F, 0.8F, 0.8F, 0.8F);
+    
+    // Enemies killed
+    snprintf(statsText, sizeof(statsText), "Enemies Defeated: %u", mGameStateManager->GetEnemiesKilled());
+    mRenderer->RenderText(statsText, -0.15F, -0.1F, 0.03F, 0.8F, 0.8F, 0.8F);
+    
+    // Wave reached
+    snprintf(statsText, sizeof(statsText), "Wave Reached: %u", mGameStateManager->GetWaveNumber());
+    mRenderer->RenderText(statsText, -0.15F, -0.15F, 0.03F, 0.8F, 0.8F, 0.8F);
+    
+    // Instructions
+    mRenderer->RenderText("Press ESC to return to menu", -0.2F, -0.3F, 0.025F, 0.6F, 0.6F, 0.6F);
 }
