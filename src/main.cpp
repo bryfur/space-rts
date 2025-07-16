@@ -6,6 +6,9 @@
 #include <ranges>
 #include <cmath>
 #include <cstdlib>
+#include <string>
+#include <sstream>
+#include <iomanip>
 #include "entities.h"
 #include "render.h"
 #include "audio.h"
@@ -81,6 +84,12 @@ int main(int argc, char* argv[]) {
     SDL_Init(SDL_INIT_VIDEO);
     SDL_Window* window = SDL_CreateWindow("Space RTS", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1600, 1200, SDL_WINDOW_OPENGL);
     SDL_GL_CreateContext(window);
+    
+    // Initialize text rendering system
+    if (!initTextRendering()) {
+        SDL_Log("Failed to initialize text rendering system");
+    }
+    
     int win_w = 1600;
     int win_h = 1200;
 
@@ -643,13 +652,13 @@ int main(int argc, char* argv[]) {
         int shipIconY = gridOriginY + (SHIP_ICON_ROW * GRID_CELL_SIZE);
         drawShipIcon(shipIconX, shipIconY, GRID_CELL_SIZE);
         
-        // Draw build queue number if any ships are queued for selected planet
+        // Draw build queue number if any ships are queued for selected planet using FreeType
         if (selectedPlanet != 0 && planetBuildQueue[selectedPlanet] > 0) {
             constexpr int NUMBER_OFFSET = 8;
-            constexpr int NUMBER_SIZE = 20; // Made bigger for better visibility
-            int numberX = shipIconX + GRID_CELL_SIZE - NUMBER_OFFSET; // Bottom right of icon
+            int numberX = shipIconX + GRID_CELL_SIZE - NUMBER_OFFSET - 15; // Bottom right of icon, adjusted for text
             int numberY = shipIconY + GRID_CELL_SIZE - NUMBER_OFFSET;
-            drawNumber(planetBuildQueue[selectedPlanet], numberX, numberY, NUMBER_SIZE);
+            std::string queueText = std::to_string(planetBuildQueue[selectedPlanet]);
+            renderTextUIWhite(queueText, numberX, numberY, 24);
         }
         
         // Draw Unit Selection Panel
@@ -674,60 +683,43 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        // Draw survival timer in top right corner
+        // Draw survival timer in top right corner using FreeType text rendering
         constexpr int TIMER_PADDING = 16;
-        constexpr int TIMER_SIZE = 24;
-        constexpr int TIMER_WIDTH = 150;
-        int timerX = win_w - TIMER_WIDTH - TIMER_PADDING;
-        int timerY = TIMER_PADDING;
+        int timerX = win_w - 120 - TIMER_PADDING; // Adjusted width for text
+        int timerY = TIMER_PADDING + 30; // Move down to avoid title bar overlap
         
         // Convert survival time to minutes and seconds
         int totalSeconds = static_cast<int>(survivalTime);
         int minutes = totalSeconds / 60;
         int seconds = totalSeconds % 60;
         
-        // Draw timer background (dark semi-transparent)
-        glColor4f(0.0F, 0.0F, 0.0F, 0.7F);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glBegin(GL_QUADS);
-        glVertex2i(timerX - 10, timerY - 5);
-        glVertex2i(win_w - 10, timerY - 5);
-        glVertex2i(win_w - 10, timerY + TIMER_SIZE + 15);
-        glVertex2i(timerX - 10, timerY + TIMER_SIZE + 15);
-        glEnd();
-        glDisable(GL_BLEND);
+        // Format timer string as MM:SS
+        std::stringstream timerText;
+        timerText << std::setfill('0') << std::setw(2) << minutes << ":" 
+                  << std::setfill('0') << std::setw(2) << seconds;
         
-        // Draw the timer using drawNumber function
-        // Format: MM:SS using individual numbers
-        glColor3f(1.0F, 1.0F, 0.0F); // Yellow text
+        // Render text with FreeType
+        renderTextUIYellow(timerText.str(), timerX, timerY, 32);
         
-        // Draw minutes (two digits)
-        drawNumber(minutes / 10, timerX, timerY, TIMER_SIZE); // Tens digit
-        drawNumber(minutes % 10, timerX + TIMER_SIZE, timerY, TIMER_SIZE); // Ones digit
+        // Example text displays to demonstrate FreeType rendering
+        renderTextUIGreen("SURVIVAL MODE", 20, 20, 28); // Green title
         
-        // Draw colon (using small rectangles)
-        glBegin(GL_QUADS);
-        glVertex2i(timerX + TIMER_SIZE * 2 + 5, timerY + 8);
-        glVertex2i(timerX + TIMER_SIZE * 2 + 10, timerY + 8);
-        glVertex2i(timerX + TIMER_SIZE * 2 + 10, timerY + 12);
-        glVertex2i(timerX + TIMER_SIZE * 2 + 5, timerY + 12);
+        // Display selected units count
+        if (!selectedUnits.empty()) {
+            std::string unitsText = "Selected: " + std::to_string(selectedUnits.size());
+            renderTextUIWhite(unitsText, 20, 60, 20); // White text
+        }
         
-        glVertex2i(timerX + TIMER_SIZE * 2 + 5, timerY + 16);
-        glVertex2i(timerX + TIMER_SIZE * 2 + 10, timerY + 16);
-        glVertex2i(timerX + TIMER_SIZE * 2 + 10, timerY + 20);
-        glVertex2i(timerX + TIMER_SIZE * 2 + 5, timerY + 20);
-        glEnd();
-        
-        // Draw seconds (two digits)
-        drawNumber(seconds / 10, timerX + TIMER_SIZE * 2 + 20, timerY, TIMER_SIZE); // Tens digit
-        drawNumber(seconds % 10, timerX + TIMER_SIZE * 3 + 20, timerY, TIMER_SIZE); // Ones digit
+        // Display enemy wave info
+        std::string waveText = "Wave: " + std::to_string(enemyWaveCount + 1);
+        renderTextUI(waveText, 20, 100, 20, 1.0F, 0.5F, 0.0F); // Orange text
         
         SDL_GL_SwapWindow(window);
         constexpr Uint32 FRAME_DELAY_MS = 16;
         SDL_Delay(FRAME_DELAY_MS);
     }
     SDL_CloseAudio();
+    cleanupTextRendering();
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
