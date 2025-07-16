@@ -2,28 +2,27 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build RTS Game",
+            "label": "CMake Build",
             "type": "shell",
-            "command": "g++",
-            "args": [
-                "main.cpp",
-                "render.cpp",
-                "audio.cpp",
-                "entities.cpp",
-                "-lSDL2",
-                "-lGL",
-                "-o",
-                "rtsgame"
-            ],
+            "command": "cmake",
+            "args": ["-S", ".", "-B", "build"],
+            "group": "build"
+        },
+        {
+            "label": "CMake Compile",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "build"],
             "group": "build",
-            "problemMatcher": ["$gcc"]
+            "dependsOn": ["CMake Build"]
         },
         {
             "label": "Run RTS Game",
             "type": "shell",
-            "command": "./rtsgame",
+            "command": "./space-rts",
+            "options": { "cwd": "${workspaceFolder}/build" },
             "group": "test",
-            "dependsOn": ["Build RTS Game"]
+            "dependsOn": ["CMake Compile"]
         }
     ]
 }

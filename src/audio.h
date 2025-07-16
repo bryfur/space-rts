@@ -1,9 +1,9 @@
 enum class SoundType { None, Beep, Pew, Boom };
+#include <vector>
 struct BeepState {
-    int beepPos;
-    int pewPos;
-    int boomPos;
-    SoundType play;
+    std::vector<int> beepPositions;
+    std::vector<int> pewPositions;
+    std::vector<int> boomPositions;
 };
 #pragma once
 #include <atomic>

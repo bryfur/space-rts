@@ -1,5 +1,6 @@
 #include "audio.h"
 #include <vector>
+#include <algorithm>
 #include <cmath>
 #include <atomic>
 #include <SDL2/SDL.h>
@@ -46,26 +47,34 @@ void audioCallback(void* userdata, Uint8* stream, int len) {
     float* out = (float*)stream;
     int samples = len / sizeof(float);
     for (int i = 0; i < samples; ++i) {
-        if (state->play == SoundType::Beep && state->beepPos < AUDIO_SAMPLES) {
-            out[i] = beepBuffer[state->beepPos++];
-        } else if (state->play == SoundType::Pew && state->pewPos < PEW_SAMPLES) {
-            out[i] = pewBuffer[state->pewPos++];
-        } else if (state->play == SoundType::Boom && state->boomPos < BOOM_SAMPLES) {
-            out[i] = boomBuffer[state->boomPos++];
-        } else {
-            out[i] = 0.0f;
+        float sample = 0.0f;
+        // Mix all active beep instances
+        for (size_t j = 0; j < state->beepPositions.size(); ++j) {
+            if (state->beepPositions[j] < AUDIO_SAMPLES)
+                sample += beepBuffer[state->beepPositions[j]++];
         }
+        // Mix all active pew instances
+        for (size_t j = 0; j < state->pewPositions.size(); ++j) {
+            if (state->pewPositions[j] < PEW_SAMPLES)
+                sample += pewBuffer[state->pewPositions[j]++];
+        }
+        // Mix all active boom instances
+        for (size_t j = 0; j < state->boomPositions.size(); ++j) {
+            if (state->boomPositions[j] < BOOM_SAMPLES)
+                sample += boomBuffer[state->boomPositions[j]++];
+        }
+        out[i] = sample;
     }
-    if (beepRequested.exchange(false)) {
-        state->beepPos = 0;
-        state->play = SoundType::Beep;
-    } else if (pewRequested.exchange(false)) {
-        state->pewPos = 0;
-        state->play = SoundType::Pew;
-    } else if (boomRequested.exchange(false)) {
-        state->boomPos = 0;
-        state->play = SoundType::Boom;
-    } else if ((state->play == SoundType::Beep && state->beepPos >= AUDIO_SAMPLES) || (state->play == SoundType::Pew && state->pewPos >= PEW_SAMPLES) || (state->play == SoundType::Boom && state->boomPos >= BOOM_SAMPLES)) {
-        state->play = SoundType::None;
-    }
+    // Remove finished beep instances
+    state->beepPositions.erase(
+        std::remove_if(state->beepPositions.begin(), state->beepPositions.end(), [](int pos) { return pos >= AUDIO_SAMPLES; }),
+        state->beepPositions.end());
+    // Remove finished pew instances
+    state->pewPositions.erase(
+        std::remove_if(state->pewPositions.begin(), state->pewPositions.end(), [](int pos) { return pos >= PEW_SAMPLES; }),
+        state->pewPositions.end());
+    // Remove finished boom instances
+    state->boomPositions.erase(
+        std::remove_if(state->boomPositions.begin(), state->boomPositions.end(), [](int pos) { return pos >= BOOM_SAMPLES; }),
+        state->boomPositions.end());
 }
