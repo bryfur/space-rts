@@ -1,0 +1,29 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build RTS Game",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "main.cpp",
+                "render.cpp",
+                "audio.cpp",
+                "entities.cpp",
+                "-lSDL2",
+                "-lGL",
+                "-o",
+                "rtsgame"
+            ],
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Run RTS Game",
+            "type": "shell",
+            "command": "./rtsgame",
+            "group": "test",
+            "dependsOn": ["Build RTS Game"]
+        }
+    ]
+}
